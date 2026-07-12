@@ -33,8 +33,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/bluebluesoda/reality-simple/
 如果你是想在原先的配置上增加用户，请使用已导出的重装指令+拼接新的字符串的方式重新安装。删除用户同理。
 
 ### Caddy 行为
-脚本自动安装和配置Caddy，用于证书管理。Caddy默认配置为对任何请求返回状态码 404 的空响应。   
-若将`@keep-caddyfile` 放在第一个用户的位置，则安装过程将完全跳过操作Caddy。 
+脚本自动安装和配置Caddy，用于证书管理。Caddy默认配置为对任何请求返回状态码 404 的空响应。 
+为减少响应带来的特征，Caddy关闭了以下特性：`h3支持` `http自动跳转https`    
+若将`@keep-caddyfile` 放在第一个用户的位置，则安装过程将完全跳过安装、配置和操作Caddy。    
+其中，亦可使用 `@keep-caddyfile:1234` 来指定回落使用固定的本机端口号。
 
 ## 使用指南
 

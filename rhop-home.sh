@@ -10,20 +10,11 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 
-# 仅支持 Debian/Ubuntu
-if [[ ! -f /etc/debian_version ]]; then
-	echo "This script is designed for Debian/Ubuntu systems only."
-	exit 1
-fi
-
 if [[ -z "$TUNNEL_SEED" || -z "$HOST" ]]; then
 	echo "需要设置环境变量 TUNNEL_SEED 和 HOST，例如："
 	echo "TUNNEL_SEED=xxxx HOST=1.2.3.4 bash rhop-home.sh US13"
 	exit 1
 fi
-
-apt-get update
-apt-get install -y unzip curl
 
 # 安装 Xray
 if [[ ! -f /usr/local/bin/xray ]]; then

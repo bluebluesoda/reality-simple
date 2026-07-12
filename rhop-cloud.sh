@@ -63,9 +63,15 @@ SEED=${SEED:-$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)}
 PORT=${PORT:-"443"}
 HOST=${HOST:-""}
 CADDYFILE=1 #是否覆写caddyfile
+DESTPORT="" 
 
-if [[ $1 == "@keep-caddyfile" ]]; then
+# 匹配 @keep-caddyfile 或者 @keep-caddyfile:端口
+if [[ $1 == "@keep-caddyfile" || $1 == @keep-caddyfile:* ]]; then
 	CADDYFILE=0
+	# 如果包含冒号，则截取冒号后面的内容赋值给 DESTPORT
+	if [[ $1 == @keep-caddyfile:* ]]; then
+		DESTPORT="${1#@keep-caddyfile:}"
+	fi
 fi
 
 [[ "$(awk '/^MemTotal:/{print $2}' /proc/meminfo)" -lt $((400 * 1024)) ]] && echo "系统内存小于512M，可能导致安装失败"
@@ -381,18 +387,19 @@ CADDYPORT=$(((tmpport % 30000) + 10000))
 # 如果AUTOTLS包含关键词shortlived
 if [[ "$AUTOTLS" == *"shortlived"* ]]; then
 	DEST="$SNI:$CADDYPORT"
+	ALLOWLOCAL="allow $SNI/32"
 elif [[ "$AUTOTLS" == "tls internal" ]]; then
 	CADDYPORT=444
 	BINDLOCAL="bind 127.0.0.1 [::1]"
 	DEST="127.0.0.1:$CADDYPORT"
 else
-	DEST="127.0.0.1:$CADDYPORT"
+	DEST="127.0.0.1:${DESTPORT:-$CADDYPORT}"
 fi
 
-warning000="Caddy listen on $DEST"
+warning000="Caddy should listen on $DEST"
 
 # 安装基础组件和caddy
-if [[ "$CADDYFILE" -eq 1 ]] || ! command -v caddy >/dev/null 2>&1; then
+if [[ "$CADDYFILE" -eq 1 ]] ; then
 	if [[ -f /etc/caddy/Caddyfile ]]; then
 		mv /etc/caddy/Caddyfile /etc/caddy/Caddyfile.$TS.bak
 		warning001="Backup of previous Caddyfile created at /etc/caddy/Caddyfile.$TS.bak"
@@ -418,6 +425,14 @@ if [[ "$CADDYFILE" -eq 1 ]] || ! command -v caddy >/dev/null 2>&1; then
 		        auto_https disable_redirects
 		        servers {
 		                protocols h1 h2
+						listener_wrappers {
+    						proxy_protocol {
+        						allow 127.0.0.1/32
+        						allow ::1/128
+        						${ALLOWLOCAL}
+    						}
+    						tls
+						}
 		        }
 		}
 
@@ -466,13 +481,13 @@ args=("$@")
 if [[ ${#args[@]} -gt 0 ]]; then
 	guests=""
 	for arg in "${args[@]}"; do
+	    if [[ "$arg" == "@keep-caddyfile"* ]]; then
+	        continue
+        fi
+		
 		if [[ ${#arg} -gt 18 ]]; then
 			echo "参数${arg}过长"
 			exit 1
-		fi
-
-		if [[ "$arg" == "@keep-caddyfile" ]]; then
-			continue
 		fi
 
 		guest_uuid=$(xray uuid -i "${arg}${USERSEC}")
@@ -533,7 +548,7 @@ cat >/usr/local/etc/xray/config.json <<-EOF
 	        "realitySettings": {
 	          "show": false,
 	          "dest": "${DEST}",
-	          "xver": 0,
+	          "xver": 2,
 	          "serverNames": ["","${SNI}"],
 	          "privateKey": "${private_key}",
 	          "shortIds": [""]
@@ -666,9 +681,9 @@ if [[ -n "$guests" ]]; then
 	echo "Guest 用户信息 ----------" >>~/_xray_url_
 	echo "空间有限不生成二维码，可用前端工具自行生成 https://emn178.github.io/online-tools/qr-code/generator/ " >>~/_xray_url_
 	for arg in "${args[@]}"; do
-		if [[ "$arg" == "@keep-caddyfile" ]]; then
-			continue
-		fi
+		if [[ "$arg" == "@keep-caddyfile"* ]]; then
+    	    continue
+        fi
 		guest_uuid=$(xray uuid -i "${arg}${USERSEC}")
 		guest_url="vless://${guest_uuid}@${HOST}:${PORT}?flow=xtls-rprx-vision&type=tcp&security=reality&fp=firefox&sni=${SNI}&pbk=${public_key}#${REGION_ID}-${arg}"
 		echo "${guest_url}" >>~/_xray_url_
@@ -698,6 +713,9 @@ cat ~/_xray_url_
 if [[ $CADDYFILE -eq 0 ]]; then
 	echo ""
 	echo "===== 由于 @keep-caddyfile 标签，没有更新Caddyfile ======"
+fi
+if ! command -v caddy >/dev/null 2>&1; then
+    echo "提示：系统未安装 caddy，请确保此行为符合预期？"
 fi
 
 echo "VPS IPv4:    $IPV4"
