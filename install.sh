@@ -3,7 +3,7 @@
 # @since 2024-10-21
 # @description Reality One-click Installer Lite
 BASEURL="https://raw.githubusercontent.com/bluebluesoda/reality-simple/refs/heads/main/"
-export XRAYVER="--version v25.5.16"
+export XRAYVER="--version v26.3.27"
 export CI=1
 export AUTOMATION=1
 QDISC="cake"
@@ -476,8 +476,8 @@ UUID=$(xray uuid -i $SEED)
 priv_hex=$(echo -n "$SEED" | sha256sum | cut -c1-64)
 priv_b64=$(echo "$priv_hex" | xxd -r -p | base64 | tr '+/' '-_' | tr -d '=')
 tmp_key=$(xray x25519 -i "$priv_b64")
-private_key=$(printf '%s\n' "$tmp_key" | awk -F': ' '/^Private key:/ {print $2}')
-public_key=$(printf '%s\n' "$tmp_key" | awk -F': ' '/^Public key:/ {print $2}')
+private_key=$(echo "$tmp_key" | awk -F': *' '/^PrivateKey:/          {print $2}')
+public_key=$(echo "$tmp_key"  | awk -F': *' '/^Password[^:]*:/       {print $2}')
 USERSEC=$(echo -n "$SEED" | sha256sum | xxd -r -p | base64 | head -c 12)
 
 args=("$@")
