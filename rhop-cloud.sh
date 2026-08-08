@@ -329,9 +329,13 @@ setup_swap() {
 	local total_mem_kb
 	total_mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
  
-	# 内存大于1.5G无需考虑swap流程
-	if [[ -n "$total_mem_kb" && "$total_mem_kb" -gt $((1400 * 1024)) ]]; then
-		return
+    # 根据系统类型判定是否需要添加swap
+	if [[ -n "$total_mem_kb" ]]; then
+		if [[ "$OS_FAMILY" == "rhel" && "$total_mem_kb" -gt $((930 * 1024)) ]]; then
+			return
+		elif [[ "$OS_FAMILY" == "debian" && "$total_mem_kb" -gt $((330 * 1024)) ]]; then
+			return
+		fi
 	fi
  
 	local active_swap
