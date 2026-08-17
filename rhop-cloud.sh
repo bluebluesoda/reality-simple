@@ -59,6 +59,21 @@ if [[ $EUID -ne 0 ]]; then
 	exit 1
 fi
 
+TOTAL_MEM_KB=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo)
+MEM_LIMIT_MB=0
+if [[ "$OS_FAMILY" == "rhel" ]]; then
+	MEM_LIMIT_MB=900
+elif [[ "$OS_FAMILY" == "debian" ]]; then
+	MEM_LIMIT_MB=430
+fi
+if [[ -n "$TOTAL_MEM_KB" && "$MEM_LIMIT_MB" -gt 0 && "$TOTAL_MEM_KB" -lt $((MEM_LIMIT_MB * 1024)) ]]; then
+	read -r -p "你使用小内存机器,可能导致安装失败,仍要继续安装？（y/N）" continue_install
+	if [[ ! "$continue_install" =~ ^[Yy]$ ]]; then
+		echo "已取消安装"
+		exit 1
+	fi
+fi
+
 SEED=${SEED:-$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)}
 PORT=${PORT:-"443"}
 HOST=${HOST:-""}
@@ -74,7 +89,19 @@ if [[ $1 == "@keep-caddyfile" || $1 == @keep-caddyfile:* ]]; then
 	fi
 fi
 
-[[ "$(awk '/^MemTotal:/{print $2}' /proc/meminfo)" -lt $((400 * 1024)) ]] && echo "系统内存小于512M，可能导致安装失败"
+for arg in "$@"; do
+	if [[ "$arg" == "@keep-caddyfile"* ]]; then
+		continue
+	fi
+	if [[ ! "$arg" =~ ^[A-Za-z0-9]+$ ]]; then
+		echo "参数${arg}只能包含数字和字母，且区分大小写"
+		exit 1
+	fi
+	if [[ ${#arg} -gt 18 ]]; then
+		echo "参数${arg}过长"
+		exit 1
+	fi
+done
 
 # 获取基本网络信息
 TRACE4=$(curl -4 -s https://dash.cloudflare.com/cdn-cgi/trace)
@@ -324,66 +351,6 @@ else
 fi
 ###### SNI配置结束
 
-###### Swap 配置
-setup_swap() {
-	local total_mem_kb
-	total_mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
- 
-    # 根据系统类型判定是否需要添加swap
-	if [[ -n "$total_mem_kb" ]]; then
-		if [[ "$OS_FAMILY" == "rhel" && "$total_mem_kb" -gt $((930 * 1024)) ]]; then
-			return
-		elif [[ "$OS_FAMILY" == "debian" && "$total_mem_kb" -gt $((330 * 1024)) ]]; then
-			return
-		fi
-	fi
- 
-	local active_swap
-	active_swap=$(swapon --show=NAME --noheadings 2>/dev/null)
- 
-	if [[ -n "$active_swap" ]]; then
-		return
-	fi
- 
-	# 清理 /etc/fstab 中未启用的 swap 条目
-	if [[ -f /etc/fstab ]] && grep -qE '(^|\s)swap(\s|$)' /etc/fstab; then
-		cp /etc/fstab /etc/fstab.$TS.bak
-		while IFS= read -r line; do
-			[[ -z "$line" || "$line" =~ ^# ]] && continue
-			local swap_target
-			swap_target=$(echo "$line" | awk '{print $1}')
-			# 仅当目标是一个普通文件时才物理删除；swap分区/设备保留不动
-			if [[ -f "$swap_target" ]]; then
-				rm -f "$swap_target"
-				echo "已删除未启用的swap文件: $swap_target"
-			fi
-		done < <(grep -E '(^|\s)swap(\s|$)' /etc/fstab)
- 
-		sed -i '/\sswap\s/d' /etc/fstab
-		echo "已清理 /etc/fstab 中未启用的swap条目 (备份于 /etc/fstab.$TS.bak)"
-	fi
- 
-	# 创建全新的 512M swap 文件
-    local swapfile="/swapfile"
-    [[ -f "$swapfile" ]] && rm -f "$swapfile"
-
-    if command -v fallocate >/dev/null 2>&1 && fallocate -l 512M "$swapfile" 2>/dev/null; then
-    	:
-    else
-	    dd if=/dev/zero of="$swapfile" bs=1M count=512 status=none
-    fi
-
-    chmod 600 "$swapfile"
-    mkswap "$swapfile" >/dev/null
-    swapon "$swapfile"
-
-    if ! grep -qE "^${swapfile}\s" /etc/fstab 2>/dev/null; then
-	    echo "${swapfile} none swap sw 0 0" >>/etc/fstab
-    fi
-}
- 
-setup_swap
-
 HEX_PART=$(echo -n "$SEED" | md5sum | cut -c1-6)
 tmpport=$((16#$HEX_PART))
 CADDYPORT=$(((tmpport % 30000) + 10000))
@@ -409,18 +376,58 @@ if [[ "$CADDYFILE" -eq 1 ]] ; then
 		warning001="Backup of previous Caddyfile created at /etc/caddy/Caddyfile.$TS.bak"
 	fi
 
-	if ! command -v caddy >/dev/null 2>&1; then
-		if [[ "$OS_FAMILY" == "debian" ]]; then
-			echo "deb [trusted=yes] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" >/etc/apt/sources.list.d/caddy-stable.list
-			apt-get update
-			apt-get install -y caddy
-		else
-			# Rocky/AlmaLinux: 通过官方 COPR 仓库安装 caddy
-			$PKG_MANAGER install -y 'dnf-command(copr)'
-			$PKG_MANAGER copr enable -y @caddy/caddy
-			$PKG_MANAGER install -y caddy
+	if [[ ! -x /usr/bin/caddy ]]; then
+		install_caddy_binary() (
+			set -euo pipefail
+			local arch dl_url tmp
+
+			case "$(uname -m)" in
+				x86_64) arch="amd64" ;;
+				aarch64) arch="arm64" ;;
+				*) echo "不支持的 Caddy CPU 架构: $(uname -m)" >&2; exit 1 ;;
+			esac
+
+			dl_url="https://caddyserver.com/api/download?os=linux&arch=${arch}"
+			[[ -n "${CADDY_VERSION:-}" ]] && dl_url="${dl_url}&id=linux-${arch}-${CADDY_VERSION}"
+			tmp=$(mktemp)
+			trap 'rm -f "$tmp"' EXIT
+			curl -fSL --retry 3 -o "$tmp" "$dl_url"
+			install -m 755 "$tmp" /usr/bin/caddy
+		)
+
+		if ! install_caddy_binary; then
+			echo "Caddy 下载或安装失败" >&2
+			exit 1
 		fi
 	fi
+
+	id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --shell /usr/sbin/nologin caddy
+	install -d -o caddy -g caddy /etc/caddy /var/lib/caddy
+
+	cat >/usr/lib/systemd/system/caddy.service <<'EOF'
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	systemctl daemon-reload
 
 	# Caddyfile
 	cat >/etc/caddy/Caddyfile <<-EOF
@@ -488,11 +495,6 @@ if [[ ${#args[@]} -gt 0 ]]; then
 	    if [[ "$arg" == "@keep-caddyfile"* ]]; then
 	        continue
         fi
-		
-		if [[ ${#arg} -gt 18 ]]; then
-			echo "参数${arg}过长"
-			exit 1
-		fi
 
 		guest_uuid=$(xray uuid -i "${arg}${USERSEC}")
 		guests+=", { \"id\": \"${guest_uuid}\", \"email\": \"${arg}\", \"flow\": \"xtls-rprx-vision\" }"
@@ -620,7 +622,6 @@ if ! grep -q "^### proxy optimization start ###$" /etc/sysctl.conf; then
     tee -a /etc/sysctl.conf >/dev/null <<EOF
 
 ### proxy optimization start ###
-vm.swappiness=10
 net.ipv4.tcp_congestion_control = bbr
 net.core.default_qdisc = ${QDISC}
 net.core.netdev_max_backlog = 8192
@@ -726,4 +727,3 @@ echo "VPS IPv4:    $IPV4"
 echo "VPS IPv6:    [$IPV6]"
 echo $warning004
 echo $warning003
-
