@@ -50,7 +50,7 @@ pkg_update() {
 
 pkg_install() {
 	if [[ "$OS_FAMILY" == "debian" ]]; then
-		apt-get install -y "$@"
+		apt-get install -y --no-install-recommends "$@"
 	else
 		$PKG_MANAGER install -y "$@"
 	fi
@@ -63,17 +63,15 @@ fi
 
 TOTAL_MEM_KB=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo)
 MEM_LIMIT_MB=0
+LOW_MEMORY=0
 if [[ "$OS_FAMILY" == "rhel" ]]; then
 	MEM_LIMIT_MB=900
 elif [[ "$OS_FAMILY" == "debian" ]]; then
 	MEM_LIMIT_MB=430
 fi
 if [[ -n "$TOTAL_MEM_KB" && "$MEM_LIMIT_MB" -gt 0 && "$TOTAL_MEM_KB" -lt $((MEM_LIMIT_MB * 1024)) ]]; then
-	read -r -p "你使用小内存机器,可能导致安装失败,仍要继续安装？（y/N）" continue_install
-	if [[ ! "$continue_install" =~ ^[Yy]$ ]]; then
-		echo "已取消安装"
-		exit 1
-	fi
+	LOW_MEMORY=1
+	echo "小内存机器将不生成二维码"
 fi
 
 SEED=${SEED:-$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)}
@@ -467,14 +465,32 @@ EOF
 	systemctl restart caddy
 fi
 
-pkg_update
+missing_packages=()
+needs_epel=0
 if [[ "$OS_FAMILY" == "rhel" ]]; then
-	# EPEL 提供 qrencode / jq 等包
-	$PKG_MANAGER install -y epel-release
-	pkg_update
-	pkg_install unzip qrencode vim-common jq bind-utils
+	command -v unzip >/dev/null 2>&1 || missing_packages+=(unzip)
+	command -v xxd >/dev/null 2>&1 || missing_packages+=(vim-common)
+	if [[ "$LOW_MEMORY" -eq 0 ]]; then
+		command -v qrencode >/dev/null 2>&1 || { missing_packages+=(qrencode); needs_epel=1; }
+		command -v dig >/dev/null 2>&1 || missing_packages+=(bind-utils)
+	fi
 else
-	pkg_install unzip qrencode xxd jq dnsutils
+	command -v unzip >/dev/null 2>&1 || missing_packages+=(unzip)
+	command -v xxd >/dev/null 2>&1 || missing_packages+=(xxd)
+	if [[ "$LOW_MEMORY" -eq 0 ]]; then
+		command -v qrencode >/dev/null 2>&1 || missing_packages+=(qrencode)
+		command -v dig >/dev/null 2>&1 || missing_packages+=(dnsutils)
+	fi
+fi
+if [[ ${#missing_packages[@]} -gt 0 ]]; then
+	pkg_update
+	if [[ "$needs_epel" -eq 1 ]] && ! rpm -q epel-release >/dev/null 2>&1; then
+		$PKG_MANAGER install -y epel-release
+		pkg_update
+	fi
+	pkg_install "${missing_packages[@]}"
+fi
+if [[ "$OS_FAMILY" == "debian" ]]; then
 	apt-get clean
 fi
 
@@ -727,14 +743,18 @@ systemctl status caddy --no-pager -l
 # 获取代理位置
 COUNTRYCODE=$(echo "$TRACE4" | grep '^loc=' | cut -d= -f2)
 COLO=$(echo "$TRACE4" | grep '^colo=' | cut -d= -f2)
-# 获取 ASN
-if [[ -n "$IPV4" ]] && command -v dig >/dev/null 2>&1; then
-    ASN_NUM=$(dig +short "$(echo "$IPV4"|awk -F. '{print $4"."$3"."$2"."$1}').origin.asn.cymru.com" TXT 2>/dev/null|cut -d\| -f1|tr -dc 0-9)
-fi
-[[ -z "$ASN_NUM" ]] && ASN_NUM=$(curl -s --max-time 3 https://ipwho.is/ 2>/dev/null|grep -oP '"asn":\s*"?\K[0-9]+'|sed 's/"//g')
+if [[ "$LOW_MEMORY" -eq 1 ]]; then
+	REGION_ID="${COUNTRYCODE:-XX}00"
+else
+	# 获取 ASN
+	if [[ -n "$IPV4" ]] && command -v dig >/dev/null 2>&1; then
+		ASN_NUM=$(dig +short "$(echo "$IPV4"|awk -F. '{print $4"."$3"."$2"."$1}').origin.asn.cymru.com" TXT 2>/dev/null|cut -d\| -f1|tr -dc 0-9)
+	fi
+	[[ -z "$ASN_NUM" ]] && ASN_NUM=$(curl -s --max-time 3 https://ipwho.is/ 2>/dev/null|grep -oP '"asn":\s*"?\K[0-9]+'|sed 's/"//g')
 
-# 拼接并生成地域 ID (格式如 US01)
-REGION_ID=$(printf "%s%02d" "${COUNTRYCODE:-XX}" "$(echo -n "${ASN_NUM}${COLO:-XX}"|cksum|awk '{print $1%100}')")
+	# 拼接并生成地域 ID (格式如 US01)
+	REGION_ID=$(printf "%s%02d" "${COUNTRYCODE:-XX}" "$(echo -n "${ASN_NUM}${COLO:-XX}"|cksum|awk '{print $1%100}')")
+fi
 
 # 生成 VLESS Reality URL
 insert="SEED=$SEED"
@@ -758,7 +778,11 @@ fi
 
 vless_reality_url="vless://${UUID}@${HOST}:${PORT}?flow=xtls-rprx-vision&type=tcp&security=reality&fp=firefox&sni=${SNI}&pbk=${public_key}#${REGION_ID}"
 
-qrencode -t UTF8 -s 1 -l L -m 2 "$vless_reality_url" >~/_xray_url_
+if [[ "$LOW_MEMORY" -eq 0 ]]; then
+	qrencode -t UTF8 -s 1 -l L -m 2 "$vless_reality_url" >~/_xray_url_
+else
+	echo "小内存机器将不生成二维码" >~/_xray_url_
+fi
 echo "---------- VLESS Reality URL ----------" >>~/_xray_url_
 echo $vless_reality_url >>~/_xray_url_
 echo >>~/_xray_url_
