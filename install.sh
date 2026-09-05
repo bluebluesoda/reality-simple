@@ -348,6 +348,30 @@ else
 fi
 ###### SNI配置结束
 
+# Caddy 2.8+ (Go 1.23+) 默认启用 PQC 混合组 X25519MLKEM768。
+# 显式声明 curves 会覆盖默认值从而关闭 PQC。AUTOTLS 仅三种受控取值,按形态渲染完整 tls 块。
+case "$AUTOTLS" in
+	"")
+		SITE_TLS='tls {
+    curves x25519 secp256r1
+}'
+		;;
+	"tls internal")
+		SITE_TLS='tls {
+    issuer internal
+    curves x25519 secp256r1
+}'
+		;;
+	*)
+		SITE_TLS='tls {
+    issuer acme {
+        profile shortlived
+    }
+    curves x25519 secp256r1
+}'
+		;;
+esac
+
 # 当检测到warp时且HOST未设置时，询问用户HOST值
 if [[ "$WARP4" != "off" && "$WARP6" != "off" && -z "$HOST" ]]; then
 	echo "无法获取本机IP地址，请手动输入HOST用于生成节点链接"
@@ -455,7 +479,7 @@ EOF
 		}
 
 		https://${SNI}:${CADDYPORT} {
-		    ${AUTOTLS}
+		    ${SITE_TLS}
 		    ${BINDLOCAL} 
 		    respond 404
 		}

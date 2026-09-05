@@ -349,6 +349,30 @@ else
 fi
 ###### SNI配置结束
 
+# Caddy 2.8+ (Go 1.23+) 默认启用 PQC 混合组 X25519MLKEM768。
+# 显式声明 curves 会覆盖默认值从而关闭 PQC。AUTOTLS 仅三种受控取值,按形态渲染完整 tls 块。
+case "$AUTOTLS" in
+	"")
+		SITE_TLS='tls {
+    curves x25519 secp256r1
+}'
+		;;
+	"tls internal")
+		SITE_TLS='tls {
+    issuer internal
+    curves x25519 secp256r1
+}'
+		;;
+	*)
+		SITE_TLS='tls {
+    issuer acme {
+        profile shortlived
+    }
+    curves x25519 secp256r1
+}'
+		;;
+esac
+
 HEX_PART=$(echo -n "$SEED" | md5sum | cut -c1-6)
 tmpport=$((16#$HEX_PART))
 CADDYPORT=$(((tmpport % 30000) + 10000))
@@ -446,7 +470,7 @@ EOF
 		}
 
 		https://${SNI}:${CADDYPORT} {
-		    ${AUTOTLS}
+		    ${SITE_TLS}
 		    ${BINDLOCAL} 
 		    respond 404
 		}
