@@ -350,17 +350,18 @@ fi
 ###### SNI配置结束
 
 # Caddy 2.8+ (Go 1.23+) 默认启用 PQC 混合组 X25519MLKEM768。
-# 显式声明 curves 会覆盖默认值从而关闭 PQC。AUTOTLS 仅三种受控取值,按形态渲染完整 tls 块。
+# 显式声明 curves 会覆盖默认值,需列出全部经典曲线(x25519 secp256r1 secp384r1 secp521r1)
+# 且不写 x25519mlkem768,即可仅关闭 PQC 而不丢失其余曲线。AUTOTLS 仅三种受控取值,按形态渲染完整 tls 块。
 case "$AUTOTLS" in
 	"")
 		SITE_TLS='tls {
-    curves x25519 secp256r1
+    curves x25519 secp256r1 secp384r1 secp521r1
 }'
 		;;
 	"tls internal")
 		SITE_TLS='tls {
     issuer internal
-    curves x25519 secp256r1
+    curves x25519 secp256r1 secp384r1 secp521r1
 }'
 		;;
 	*)
@@ -368,7 +369,7 @@ case "$AUTOTLS" in
     issuer acme {
         profile shortlived
     }
-    curves x25519 secp256r1
+    curves x25519 secp256r1 secp384r1 secp521r1
 }'
 		;;
 esac
