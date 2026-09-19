@@ -746,15 +746,13 @@ net.core.default_qdisc = ${QDISC}
 net.core.netdev_max_backlog = 8192
 net.core.rmem_default = 262144
 net.core.wmem_default = 262144
-net.ipv4.tcp_rmem = 8192 262144 16777216
-net.ipv4.tcp_wmem = 4096 16384 16777216
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 8192 262144 33554432
+net.ipv4.tcp_wmem = 4096 16384 33554432
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
 net.ipv4.tcp_window_scaling = 1
 net.ipv4.tcp_slow_start_after_idle = 0
 net.ipv4.tcp_fastopen = 3
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
 ### proxy optimization end ###
 EOF
     sysctl -p
