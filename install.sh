@@ -669,12 +669,13 @@ cat >/usr/local/etc/xray/config.json <<-EOF
 	  },
 	  "api": {
 	    "tag": "api",
-	    "services": ["StatsService"]
+	    "services": ["StatsService","HandlerService","LoggerService","RoutingService"]
 	  },
 	  "inbounds": [
 	    {
 	      "listen": "0.0.0.0",
 	      "port": ${PORT},
+		  "tag": "vless-in",
 	      "protocol": "vless",
 	      "settings": {
 	        "clients": [
