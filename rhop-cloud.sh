@@ -382,6 +382,7 @@ CADDYPORT=$(((tmpport % 30000) + 10000))
 if [[ "$AUTOTLS" == *"shortlived"* ]]; then
 	DEST="$SNI:$CADDYPORT"
 	ALLOWLOCAL="allow $SNI/32"
+	DEFAULTSNI="default_sni $SNI"
 elif [[ "$AUTOTLS" == "tls internal" ]]; then
 	CADDYPORT=444
 	BINDLOCAL="bind 127.0.0.1 [::1]"
@@ -457,6 +458,7 @@ EOF
 		{
 		        skip_install_trust
 		        auto_https disable_redirects
+				${DEFAULTSNI}
 		        servers {
 		                protocols h1 h2
 						listener_wrappers {
@@ -570,7 +572,7 @@ cat >/usr/local/etc/xray/config.json <<-EOF
 	  },
 	  "api": {
 	    "tag": "api",
-	    "services": ["StatsService"]
+	    "services": ["StatsService","HandlerService","LoggerService","RoutingService"]
 	  },
 	  "reverse": {
 	    "portals": [
@@ -582,6 +584,7 @@ cat >/usr/local/etc/xray/config.json <<-EOF
 	      "tag": "external",
 	      "listen": "0.0.0.0",
 	      "port": ${PORT},
+		  "tag": "vless-in",
 	      "protocol": "vless",
 	      "settings": {
 	        "clients": [
@@ -668,15 +671,13 @@ net.core.default_qdisc = ${QDISC}
 net.core.netdev_max_backlog = 8192
 net.core.rmem_default = 262144
 net.core.wmem_default = 262144
-net.ipv4.tcp_rmem = 8192 262144 16777216
-net.ipv4.tcp_wmem = 4096 16384 16777216
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 8192 262144 33554432
+net.ipv4.tcp_wmem = 4096 16384 33554432
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
 net.ipv4.tcp_window_scaling = 1
 net.ipv4.tcp_slow_start_after_idle = 0
 net.ipv4.tcp_fastopen = 3
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
 ### proxy optimization end ###
 EOF
     sysctl -p
