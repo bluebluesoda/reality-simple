@@ -391,6 +391,7 @@ CADDYPORT=$(((tmpport % 30000) + 10000))
 if [[ "$AUTOTLS" == *"shortlived"* ]]; then
 	DEST="$SNI:$CADDYPORT"
 	ALLOWLOCAL="allow $SNI/32"
+	DEFAULTSNI="default_sni $SNI"
 elif [[ "$AUTOTLS" == "tls internal" ]]; then
 	CADDYPORT=444
 	BINDLOCAL="bind 127.0.0.1 [::1]"
@@ -466,6 +467,7 @@ EOF
 		{
 		        skip_install_trust
 		        auto_https disable_redirects
+				${DEFAULTSNI}
 		        servers {
 		                protocols h1 h2
 						listener_wrappers {
